@@ -32,7 +32,7 @@ ADMIN_IDS_RAW = os.environ.get("ADMIN_ID", "8866404328")
 # سقف پیام روزانه‌ی پیش‌فرض برای کاربران عادی؛ 0 یعنی نامحدود
 DEFAULT_DAILY_LIMIT = int(os.environ.get("DAILY_LIMIT", "50") or 0)
 
-POLLINATIONS_API_KEY = os.environ.get("POLLINATIONS_API_KEY", "sk_bJg5A28imMHYUBIGJU23NYuqaRUQsyku"")
+POLLINATIONS_API_KEY = os.environ.get("POLLINATIONS_API_KEY", "sk_bJg5A28imMHYUBIGJU23NYuqaRUQsyku")
 POLLINATIONS_CHAT_URL = "https://gen.pollinations.ai/v1/chat/completions"
 CHAT_MODEL = "openai/gpt-5.4-nano"
 SYSTEM_PROMPT = (
