@@ -6,6 +6,7 @@
 # - دکمه‌های رنگی کیبورد و پنل (style: primary / success / danger؛ نیاز به Bot API 9.4)
 # - نوار پیشرفت، عکس، ویرایش عکس، ویس، حذف تاریخچه
 # - نمادهای متنی بدون ایموجی
+# - سرور keep-alive برای نگه داشتن سرویس روی Render
 
 import os
 import sys
@@ -16,12 +17,13 @@ import random
 import threading
 from datetime import datetime
 from urllib.parse import quote
+from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import requests
 
 
 # ============================================================
-# تنظیمات
+# تنظیمات (همه از Environment Variables خوانده می‌شوند)
 # ============================================================
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "9204950570:AAFzycx2TKuxm3kLWO8NCN7efK4xDEbEzRE")
 
@@ -30,7 +32,7 @@ ADMIN_IDS_RAW = os.environ.get("ADMIN_ID", "8866404328")
 # سقف پیام روزانه‌ی پیش‌فرض برای کاربران عادی؛ 0 یعنی نامحدود
 DEFAULT_DAILY_LIMIT = int(os.environ.get("DAILY_LIMIT", "50") or 0)
 
-POLLINATIONS_API_KEY = os.environ.get("POLLINATIONS_API_KEY", "sk_bJg5A28imMHYUBIGJU23NYuqaRUQsyku")
+POLLINATIONS_API_KEY = os.environ.get("POLLINATIONS_API_KEY", "sk_bJg5A28imMHYUBIGJU23NYuqaRUQsyku"")
 POLLINATIONS_CHAT_URL = "https://gen.pollinations.ai/v1/chat/completions"
 CHAT_MODEL = "openai/gpt-5.4-nano"
 SYSTEM_PROMPT = (
@@ -162,6 +164,34 @@ ADMIN_CLOSED_TEXT = "✖ پنل بسته شد. برای باز کردن دوبا
 
 USERS_PER_PAGE = 8
 DEBUG = False
+
+
+# ============================================================
+# سرور keep-alive برای Render
+# ============================================================
+class _PingHandler(BaseHTTPRequestHandler):
+    def _ok(self):
+        self.send_response(200)
+        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.end_headers()
+        if self.command != "HEAD":
+            self.wfile.write(b"ok")
+
+    def do_GET(self):
+        self._ok()
+
+    def do_HEAD(self):
+        self._ok()
+
+    def log_message(self, *args):
+        pass  # لاگ درخواست‌های پینگ را چاپ نکن
+
+
+def start_keepalive_server():
+    port = int(os.environ.get("PORT", "10000"))  # Render این را خودش تنظیم می‌کند
+    server = HTTPServer(("0.0.0.0", port), _PingHandler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    print("سرور keep-alive روی پورت %d اجرا شد." % port)
 
 
 # ============================================================
@@ -1296,6 +1326,9 @@ def main():
         print("هشدار: POLLINATIONS_API_KEY تنظیم نشده است.")
     if not ADMIN_IDS:
         print("هشدار: ADMIN_ID تنظیم نشده است؛ پنل مدیریت فعال نیست.")
+
+    # سرور keep-alive برای اینکه Render سرویس را خاموش نکند
+    start_keepalive_server()
 
     print("ربات تلگرام در حال اجراست. برای توقف Ctrl+C را بزنید.")
 
