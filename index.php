@@ -2,7 +2,7 @@
 declare(strict_types=1);
 
 // ============================================================
-// ربات تلگرام + Pollinations - نسخه‌ی PHP (حالت Long Polling)
+// ربات تلگرام + Pollinations + Gemini Fallback
 // ============================================================
 
 function env(string $name, string $default = ''): string
@@ -15,14 +15,19 @@ date_default_timezone_set(env('TIMEZONE', 'UTC'));
 set_time_limit(0);
 ignore_user_abort(true);
 
-// ----- تنظیمات (مقادیر مستقیماً وارد شده‌اند) -----
-define('BOT_TOKEN', '9204950570:AAFzycx2TKuxm3kLWO8NCN7efK4xDEbEzRE');
-define('ADMIN_IDS_RAW', '8866404328');
-define('DEFAULT_DAILY_LIMIT', 50);
-define('POLLINATIONS_API_KEY', 'sk_bJg5A28imMHYUBIGJU23NYuqaRUQsyku');
-define('WEBHOOK_SECRET', '');
-define('STORAGE_DIR', rtrim(env('STORAGE_DIR', __DIR__ . '/data'), '/'));
+// ----- تنظیمات (مقادیر حساس از Environment Variables خوانده می‌شوند) -----
+define('BOT_TOKEN', env('BOT_TOKEN', '204950570:AAFzycx2TKuxm3kLWO8NCN7efK4xDEbEzRE'));
+define('ADMIN_IDS_RAW', env('ADMIN_ID', '8866404328'));
+define('DEFAULT_DAILY_LIMIT', (int) env('DAILY_LIMIT', '50'));
+define('POLLINATIONS_API_KEY', env('POLLINATIONS_API_KEY', 'sk_bJg5A28imMHYUBIGJU23NYuqaRUQsyku'));
+define('WEBHOOK_SECRET', env('WEBHOOK_SECRET', ''));
 
+// --- تنظیمات Gemini (کلید از Environment Variable خوانده می‌شود) ---
+define('GEMINI_API_KEY', env('GEMINI_API_KEY', 'AQ.Ab8RN6Led5ixwhzduPxQxOZ4Np6Uk8O04ODiaO637_Mdz7ztIA'));
+define('GEMINI_CHAT_URL', 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions');
+define('GEMINI_MODEL', 'gemini-2.5-flash');
+
+define('STORAGE_DIR', rtrim(env('STORAGE_DIR', __DIR__ . '/data'), '/'));
 define('API', 'https://api.telegram.org/bot' . BOT_TOKEN . '/');
 define('FILE_API', 'https://api.telegram.org/file/bot' . BOT_TOKEN . '/');
 
@@ -112,7 +117,7 @@ const VOICE_ON_TEXT = '♫ حالت ویس روشن شد. از این به بع�
 const VOICE_OFF_TEXT = '✎ حالت ویس خاموش شد. از این به بعد پاسخ‌ها متنی هستند.';
 const HISTORY_CLEARED_TEXT = '✓ گفتگو و پیام‌های این چت پاک شد. از این به بعد از صفر شروع می‌کنیم.';
 const CANCEL_TEXT = '⊘ لغو شد.';
-const AI_REPLY_ERROR = '✖ متأسفم، الان نتونستم جواب بدم. کمی بعد دوباره امتحان کن.';
+const AI_REPLY_ERROR = '⚠️ در حال حاضر سرور با مشکل مواجه است. لطفاً بعداً دوباره تلاش کنید.';
 const BANNED_TEXT = '⊘ دسترسی شما توسط مدیر محدود شده است.';
 const UNBANNED_TEXT = '✓ دسترسی شما دوباره فعال شد.';
 const LIMIT_REACHED_TEXT = '⊘ سقف پیام امروز تو تمام شد. فردا دوباره امتحان کن.';
@@ -679,36 +684,57 @@ function authHeader(): string
 }
 
 // ============================================================
-// هوش مصنوعی (چت)
+// هوش مصنوعی (چت) - با Fallback به Gemini
 // ============================================================
 function aiChat(array $messages, ?Progress $progress = null): ?string
 {
-    if (POLLINATIONS_API_KEY === '') {
+    // --- تلاش اول: Pollinations ---
+    if (POLLINATIONS_API_KEY !== '') {
+        $res = httpFetch(
+            CHAT_URL,
+            ['Content-Type: application/json', authHeader()],
+            (string) json_encode(['model' => CHAT_MODEL, 'messages' => $messages], JSON_UNESCAPED_UNICODE),
+            60,
+            $progress
+        );
+
+        $data = json_decode($res['body'], true);
+        $content = is_array($data) ? ($data['choices'][0]['message']['content'] ?? null) : null;
+
+        if (is_string($content) && trim($content) !== '') {
+            return trim($content);
+        }
+
+        error_log('Pollinations failed (Status: ' . $res['status'] . '). Switching to Gemini fallback.');
+    }
+
+    // --- تلاش دوم: Gemini Fallback ---
+    if (GEMINI_API_KEY === '') {
+        error_log('Gemini API key is not set. No fallback available.');
         return null;
     }
-    $res = httpFetch(
-        CHAT_URL,
-        ['Content-Type: application/json', authHeader()],
-        (string) json_encode(['model' => CHAT_MODEL, 'messages' => $messages], JSON_UNESCAPED_UNICODE),
+
+    $geminiRes = httpFetch(
+        GEMINI_CHAT_URL,
+        ['Content-Type: application/json', 'Authorization: Bearer ' . GEMINI_API_KEY],
+        (string) json_encode(['model' => GEMINI_MODEL, 'messages' => $messages], JSON_UNESCAPED_UNICODE),
         60,
         $progress
     );
-    $data = json_decode($res['body'], true);
-    $content = is_array($data) ? ($data['choices'][0]['message']['content'] ?? null) : null;
-    if (!is_string($content) || trim($content) === '') {
-        error_log('خطا در هوش مصنوعی: ' . $res['status'] . ' ' . mb_substr($res['body'], 0, 300) . ' ' . $res['error']);
-        return null;
+
+    $geminiData = json_decode($geminiRes['body'], true);
+    $geminiContent = is_array($geminiData) ? ($geminiData['choices'][0]['message']['content'] ?? null) : null;
+
+    if (is_string($geminiContent) && trim($geminiContent) !== '') {
+        return trim($geminiContent);
     }
-    return trim($content);
+
+    error_log('Gemini fallback also failed: ' . $geminiRes['status'] . ' ' . mb_substr($geminiRes['body'], 0, 300));
+    return null;
 }
 
 function askAi(int $chatId, string $text, Progress $progress): string
 {
-    if (POLLINATIONS_API_KEY === '') {
-        error_log('POLLINATIONS_API_KEY تنظیم نشده است.');
-        return 'کلید هوش مصنوعی روی سرور تنظیم نشده است.';
-    }
-
     $history = getHistory($chatId);
     $messages = array_merge(
         [['role' => 'system', 'content' => SYSTEM_PROMPT]],
@@ -1330,7 +1356,6 @@ function handleCallback(array $cb): void
 // ============================================================
 set_time_limit(0);
 
-// حذف وب‌هوک قبلی (فقط یک بار لازم است، اما اینجا مطمئن می‌شویم)
 tg('deleteWebhook');
 
 $lastUpdateId = 0;
