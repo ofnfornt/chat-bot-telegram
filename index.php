@@ -16,7 +16,7 @@ set_time_limit(0);
 ignore_user_abort(true);
 
 // ----- تنظیمات (مقادیر مستقیماً وارد شده‌اند) -----
-define('BOT_TOKEN', '204950570:AAFzycx2TKuxm3kLWO8NCN7efK4xDEbEzRE');
+define('BOT_TOKEN', '9204950570:AAFzycx2TKuxm3kLWO8NCN7efK4xDEbEzRE');
 define('ADMIN_IDS_RAW', '8866404328');
 define('DEFAULT_DAILY_LIMIT', 50);
 define('POLLINATIONS_API_KEY', 'sk_bJg5A28imMHYUBIGJU23NYuqaRUQsyku');
