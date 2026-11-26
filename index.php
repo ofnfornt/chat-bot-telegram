@@ -20,16 +20,16 @@ define('BOT_TOKEN', env('BOT_TOKEN', '9204950570:AAFzycx2TKuxm3kLWO8NCN7efK4xDEb
 define('ADMIN_IDS_RAW', env('ADMIN_ID', '8866404328'));
 define('DEFAULT_DAILY_LIMIT', (int) env('DAILY_LIMIT', '50'));
 define('POLLINATIONS_API_KEY', env('POLLINATIONS_API_KEY', 'sk_bJg5A28imMHYUBIGJU23NYuqaRUQsyku'));
-define('WEBHOOK_SECRET', env('WEBHOOK_SECRET', ''));
+define('WEBHOOK_SECRET', env('WEBHOOK_SECRET', 'AQ.Ab8RN6Led5ixwhzduPxQxOZ4Np6Uk8O04ODiaO637_Mdz7ztIA'));
 
 // --- تنظیمات Gemini ---
-define('GEMINI_API_KEY', env('GEMINI_API_KEY', 'AQ.Ab8RN6Led5ixwhzduPxQxOZ4Np6Uk8O04ODiaO637_Mdz7ztIA'));
+define('GEMINI_API_KEY', env('GEMINI_API_KEY', ''));
 define('GEMINI_CHAT_URL', 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions');
-define('GEMINI_CHAT_MODEL', 'gemini-3.8-flash');
+define('GEMINI_CHAT_MODEL', 'gemini-2.5-flash');
 // برای عکس و ویس از endpoint اختصاصی استفاده می‌کنیم
 define('GEMINI_INTERACTIONS_URL', 'https://generativelanguage.googleapis.com/v1beta/interactions');
-define('GEMINI_IMAGE_MODEL', 'gemini-3.1-flash-image'); // یا gemini-3.1-flash-lite-image
-define('GEMINI_TTS_MODEL', 'gemini-3.8-flash-tts');
+define('GEMINI_IMAGE_MODEL', 'gemini-2.5-flash-image');
+define('GEMINI_TTS_MODEL', 'gemini-2.5-flash-tts');
 
 define('STORAGE_DIR', rtrim(env('STORAGE_DIR', __DIR__ . '/data'), '/'));
 define('API', 'https://api.telegram.org/bot' . BOT_TOKEN . '/');
