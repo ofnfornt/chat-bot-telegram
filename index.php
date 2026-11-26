@@ -2,7 +2,7 @@
 declare(strict_types=1);
 
 // ============================================================
-// ربات تلگرام + Pollinations + Gemini Fallback
+// ربات تلگرام + Pollinations + Gemini Fallback (چت، عکس، ویس)
 // ============================================================
 
 function env(string $name, string $default = ''): string
@@ -22,10 +22,14 @@ define('DEFAULT_DAILY_LIMIT', (int) env('DAILY_LIMIT', '50'));
 define('POLLINATIONS_API_KEY', env('POLLINATIONS_API_KEY', 'sk_bJg5A28imMHYUBIGJU23NYuqaRUQsyku'));
 define('WEBHOOK_SECRET', env('WEBHOOK_SECRET', ''));
 
-// --- تنظیمات Gemini (کلید از Environment Variable خوانده می‌شود) ---
+// --- تنظیمات Gemini ---
 define('GEMINI_API_KEY', env('GEMINI_API_KEY', 'AQ.Ab8RN6Led5ixwhzduPxQxOZ4Np6Uk8O04ODiaO637_Mdz7ztIA'));
 define('GEMINI_CHAT_URL', 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions');
-define('GEMINI_MODEL', 'gemini-2.5-flash');
+define('GEMINI_CHAT_MODEL', 'gemini-3.8-flash');
+// برای عکس و ویس از endpoint اختصاصی استفاده می‌کنیم
+define('GEMINI_INTERACTIONS_URL', 'https://generativelanguage.googleapis.com/v1beta/interactions');
+define('GEMINI_IMAGE_MODEL', 'gemini-3.1-flash-image'); // یا gemini-3.1-flash-lite-image
+define('GEMINI_TTS_MODEL', 'gemini-3.8-flash-tts');
 
 define('STORAGE_DIR', rtrim(env('STORAGE_DIR', __DIR__ . '/data'), '/'));
 define('API', 'https://api.telegram.org/bot' . BOT_TOKEN . '/');
@@ -708,7 +712,7 @@ function aiChat(array $messages, ?Progress $progress = null): ?string
         error_log('Pollinations failed (Status: ' . $res['status'] . '). Switching to Gemini fallback.');
     }
 
-    // --- تلاش دوم: Gemini Fallback ---
+    // --- تلاش دوم: Gemini Fallback (Chat) ---
     if (GEMINI_API_KEY === '') {
         error_log('Gemini API key is not set. No fallback available.');
         return null;
@@ -717,7 +721,7 @@ function aiChat(array $messages, ?Progress $progress = null): ?string
     $geminiRes = httpFetch(
         GEMINI_CHAT_URL,
         ['Content-Type: application/json', 'Authorization: Bearer ' . GEMINI_API_KEY],
-        (string) json_encode(['model' => GEMINI_MODEL, 'messages' => $messages], JSON_UNESCAPED_UNICODE),
+        (string) json_encode(['model' => GEMINI_CHAT_MODEL, 'messages' => $messages], JSON_UNESCAPED_UNICODE),
         60,
         $progress
     );
@@ -795,6 +799,129 @@ function fetchBinary(string $url, string $expectedType, int $timeout, Progress $
     return $res['body'];
 }
 
+// --- Gemini Image Generation (Fallback) ---
+function geminiGenerateImage(string $prompt, Progress $progress): ?string
+{
+    if (GEMINI_API_KEY === '') {
+        return null;
+    }
+    $body = [
+        'model' => GEMINI_IMAGE_MODEL,
+        'input' => [['type' => 'text', 'text' => $prompt]],
+        'response_format' => ['type' => 'image']
+    ];
+    $res = httpFetch(
+        GEMINI_INTERACTIONS_URL,
+        ['Content-Type: application/json', 'x-goog-api-key: ' . GEMINI_API_KEY],
+        (string) json_encode($body, JSON_UNESCAPED_UNICODE),
+        120,
+        $progress
+    );
+    $data = json_decode($res['body'], true);
+    if (!is_array($data)) {
+        error_log('Gemini Image: Invalid JSON response');
+        return null;
+    }
+    // استخراج تصویر از steps
+    if (isset($data['steps']) && is_array($data['steps'])) {
+        foreach ($data['steps'] as $step) {
+            if (isset($step['content']) && is_array($step['content'])) {
+                foreach ($step['content'] as $block) {
+                    if (($block['type'] ?? '') === 'image' && isset($block['data'])) {
+                        return base64_decode($block['data']);
+                    }
+                }
+            }
+        }
+    }
+    error_log('Gemini Image: No image found in response: ' . mb_substr($res['body'], 0, 300));
+    return null;
+}
+
+// --- Gemini Image Edit (Fallback) ---
+function geminiEditImage(string $prompt, string $imageUrl, Progress $progress): ?string
+{
+    if (GEMINI_API_KEY === '') {
+        return null;
+    }
+    // دریافت تصویر اصلی و تبدیل به base64
+    $imgRes = httpFetch($imageUrl);
+    if ($imgRes['status'] !== 200 || $imgRes['body'] === '') {
+        error_log('Gemini Edit: Failed to download source image');
+        return null;
+    }
+    $base64Image = base64_encode($imgRes['body']);
+    $mimeType = $imgRes['type'] ?: 'image/jpeg';
+
+    $body = [
+        'model' => GEMINI_IMAGE_MODEL,
+        'input' => [
+            ['type' => 'text', 'text' => $prompt],
+            ['type' => 'image', 'mime_type' => $mimeType, 'data' => $base64Image]
+        ],
+        'response_format' => ['type' => 'image']
+    ];
+    $res = httpFetch(
+        GEMINI_INTERACTIONS_URL,
+        ['Content-Type: application/json', 'x-goog-api-key: ' . GEMINI_API_KEY],
+        (string) json_encode($body, JSON_UNESCAPED_UNICODE),
+        180,
+        $progress
+    );
+    $data = json_decode($res['body'], true);
+    if (!is_array($data)) {
+        error_log('Gemini Edit: Invalid JSON response');
+        return null;
+    }
+    if (isset($data['steps']) && is_array($data['steps'])) {
+        foreach ($data['steps'] as $step) {
+            if (isset($step['content']) && is_array($step['content'])) {
+                foreach ($step['content'] as $block) {
+                    if (($block['type'] ?? '') === 'image' && isset($block['data'])) {
+                        return base64_decode($block['data']);
+                    }
+                }
+            }
+        }
+    }
+    error_log('Gemini Edit: No image found in response: ' . mb_substr($res['body'], 0, 300));
+    return null;
+}
+
+// --- Gemini TTS (Fallback) ---
+function geminiGenerateSpeech(string $text, Progress $progress): ?string
+{
+    if (GEMINI_API_KEY === '') {
+        return null;
+    }
+    $speech = cleanForSpeech($text);
+    if ($speech === '') {
+        return null;
+    }
+    $body = [
+        'model' => GEMINI_TTS_MODEL,
+        'input' => [['type' => 'user_input', 'content' => [['type' => 'text', 'text' => $speech]]]],
+        'response_format' => ['type' => 'audio']
+    ];
+    $res = httpFetch(
+        GEMINI_INTERACTIONS_URL,
+        ['Content-Type: application/json', 'x-goog-api-key: ' . GEMINI_API_KEY],
+        (string) json_encode($body, JSON_UNESCAPED_UNICODE),
+        120,
+        $progress
+    );
+    $data = json_decode($res['body'], true);
+    if (!is_array($data)) {
+        error_log('Gemini TTS: Invalid JSON response');
+        return null;
+    }
+    if (isset($data['output_audio']['data'])) {
+        return base64_decode($data['output_audio']['data']);
+    }
+    error_log('Gemini TTS: No audio found in response: ' . mb_substr($res['body'], 0, 300));
+    return null;
+}
+
 function generateImage(string $prompt, Progress $progress): ?string
 {
     $english = prepareImagePrompt($prompt, $progress);
@@ -804,7 +931,12 @@ function generateImage(string $prompt, Progress $progress): ?string
         'height' => IMAGE_SIZE,
         'nologo' => 'true',
     ]);
-    return fetchBinary($url, 'image/', 120, $progress);
+    $result = fetchBinary($url, 'image/', 120, $progress);
+    if ($result === null) {
+        error_log('Pollinations Image failed, trying Gemini fallback...');
+        $result = geminiGenerateImage($english, $progress);
+    }
+    return $result;
 }
 
 function editImage(string $prompt, string $imageUrl, Progress $progress): ?string
@@ -820,7 +952,12 @@ function editImage(string $prompt, string $imageUrl, Progress $progress): ?strin
         'height' => IMAGE_SIZE,
         'nologo' => 'true',
     ]);
-    return fetchBinary($url, 'image/', 180, $progress);
+    $result = fetchBinary($url, 'image/', 180, $progress);
+    if ($result === null) {
+        error_log('Pollinations Edit failed, trying Gemini fallback...');
+        $result = geminiEditImage($english, $imageUrl, $progress);
+    }
+    return $result;
 }
 
 function cleanForSpeech(string $text): string
@@ -832,23 +969,21 @@ function cleanForSpeech(string $text): string
 
 function generateSpeech(string $text, string $voice, Progress $progress): ?string
 {
-    if (POLLINATIONS_API_KEY === '') {
-        error_log('ویس: کلید Pollinations تنظیم نشده است.');
-        return null;
+    if (POLLINATIONS_API_KEY !== '') {
+        $speech = cleanForSpeech($text);
+        if ($speech !== '') {
+            $url = AUDIO_URL . rawurlencode($speech) . '?' . http_build_query(['voice' => $voice]);
+            $res = httpFetch($url, [authHeader()], null, 120, $progress);
+            $type = $res['type'];
+            if ($res['status'] === 200 && $res['body'] !== ''
+                && !str_starts_with($type, 'application/json') && !str_starts_with($type, 'text/')) {
+                return $res['body'];
+            }
+            error_log('Pollinations TTS failed, trying Gemini fallback...');
+        }
     }
-    $speech = cleanForSpeech($text);
-    if ($speech === '') {
-        return null;
-    }
-    $url = AUDIO_URL . rawurlencode($speech) . '?' . http_build_query(['voice' => $voice]);
-    $res = httpFetch($url, [authHeader()], null, 120, $progress);
-    $type = $res['type'];
-    if ($res['status'] !== 200 || $res['body'] === ''
-        || str_starts_with($type, 'application/json') || str_starts_with($type, 'text/')) {
-        error_log('ویس: پاسخ نامعتبر، کد: ' . $res['status'] . ' نوع: ' . $type . ' متن: ' . mb_substr($res['body'], 0, 300));
-        return null;
-    }
-    return $res['body'];
+    // Fallback to Gemini TTS
+    return geminiGenerateSpeech($text, $progress);
 }
 
 function runMediaJob(int $chatId, string $label, string $doneText, string $errorText, callable $build, string $caption = ''): void
