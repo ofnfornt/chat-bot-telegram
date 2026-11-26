@@ -15,12 +15,12 @@ date_default_timezone_set(env('TIMEZONE', 'UTC'));
 set_time_limit(300);
 ignore_user_abort(true);
 
-// ----- تنظیمات (همه از Environment Variables خوانده می‌شوند) -----
-define('BOT_TOKEN', env('BOT_TOKEN'));
-define('ADMIN_IDS_RAW', env('ADMIN_ID'));                        // چند نفر با کاما: 123,456
-define('DEFAULT_DAILY_LIMIT', (int) env('DAILY_LIMIT', '50'));   // 0 یعنی نامحدود
-define('POLLINATIONS_API_KEY', env('POLLINATIONS_API_KEY'));
-define('WEBHOOK_SECRET', env('WEBHOOK_SECRET'));                 // همان secret_token در setWebhook
+// ----- تنظیمات (مقادیر مستقیماً وارد شده‌اند) -----
+define('BOT_TOKEN', '204950570:AAFzycx2TKuxm3kLWO8NCN7efK4xDEbEzRE'); // <--- توکن را اینجا بگذارید
+define('ADMIN_IDS_RAW', '8866404328'); // <--- آیدی عددی خود را اینجا بگذارید (مثلاً '123456789')
+define('DEFAULT_DAILY_LIMIT', 50);
+define('POLLINATIONS_API_KEY', 'sk_bJg5A28imMHYUBIGJU23NYuqaRUQsyku'); // <--- کلید API را اینجا بگذارید
+define('WEBHOOK_SECRET', '');
 define('STORAGE_DIR', rtrim(env('STORAGE_DIR', __DIR__ . '/data'), '/'));
 
 define('API', 'https://api.telegram.org/bot' . BOT_TOKEN . '/');
@@ -40,12 +40,12 @@ const MAX_SPEECH_CHARS = 800;
 
 const IMAGE_URL = 'https://gen.pollinations.ai/image/';
 const IMAGE_MODEL = 'flux';
-const EDIT_MODEL = 'kontext';   // ممکن است نیاز به سطح پولی داشته باشد
+const EDIT_MODEL = 'kontext';
 const IMAGE_SIZE = 1024;
 const AUDIO_URL = 'https://gen.pollinations.ai/audio/';
 const DEFAULT_VOICE = 'alloy';
 const VOICE_OPTIONS = ['alloy', 'nova', 'onyx', 'shimmer', 'echo', 'fable'];
-const EDIT_ENABLED = true;      // اگر false باشد دکمه‌ی ویرایش عکس نشان داده نمی‌شود
+const EDIT_ENABLED = true;
 const USERS_PER_PAGE = 8;
 
 // ----- نوار پیشرفت -----
@@ -152,7 +152,6 @@ function tx(callable $fn, bool $write = true): mixed
     }
 }
 
-// هشدار: داخل tx هرگز tx دیگری صدا نزن (قفل می‌ماند)
 function kvGet(string $key, mixed $default = null): mixed
 {
     return tx(static fn(array $d) => $d[$key] ?? $default, false);
@@ -272,7 +271,6 @@ function getDailyLimit(): int
     return $value === null ? DEFAULT_DAILY_LIMIT : (int) $value;
 }
 
-// اگر کاربر امروز به سقف نرسیده باشد True برمی‌گرداند و شمارش را بالا می‌برد
 function withinQuota(int $chatId): bool
 {
     $limit = getDailyLimit();
@@ -296,7 +294,6 @@ function withinQuota(int $chatId): bool
     });
 }
 
-// جلوگیری از پردازش دوباره‌ی یک آپدیت (وقتی تلگرام به‌خاطر کندی دوباره می‌فرستد)
 function claimUpdate(int $updateId): bool
 {
     return tx(static function (array &$d) use ($updateId): bool {
@@ -396,7 +393,6 @@ function tg(string $method, array $params = []): array
     return $data;
 }
 
-// پیام بدون ثبت در لیست پیام‌های قابل پاک‌سازی
 function notify(int $chatId, string $text): void
 {
     tg('sendMessage', ['chat_id' => $chatId, 'text' => $text]);
@@ -478,7 +474,6 @@ function answerCallback(string $callbackId, string $text = ''): void
     tg('answerCallbackQuery', $params);
 }
 
-// لینک فایل عکسی که کاربر فرستاده (برای ویرایش)
 function getIncomingImageUrl(array $m): ?string
 {
     $fileId = null;
@@ -595,7 +590,6 @@ final class Progress
         return $this;
     }
 
-    // وقتی درخواست در حال انتظار است صدا زده می‌شود
     public function pulse(): void
     {
         if ($this->messageId === null) {
@@ -654,7 +648,6 @@ function httpFetch(string $url, array $headers = [], ?string $body = null, int $
     if ($progress === null) {
         $content = curl_exec($ch);
     } else {
-        // اجرای غیرهمزمان تا نوار پیشرفت وسط انتظار به‌روز شود
         $mh = curl_multi_init();
         curl_multi_add_handle($mh, $ch);
         $running = 1;
@@ -1105,14 +1098,12 @@ function handleMessage(array $m): void
         return;
     }
 
-    // پیام همگانی از پنل مدیریت
     if ($admin && $text !== '' && !isButton($text) && kvGet('admin_bcast_' . $chatId) !== null) {
         kvDelete('admin_bcast_' . $chatId);
         doBroadcast($chatId, $text);
         return;
     }
 
-    // سقف روزانه برای کاربران عادی (دکمه‌ها و دستورها شمرده نمی‌شوند)
     if (!$admin && !isButton($text) && !withinQuota($chatId)) {
         sendText($chatId, LIMIT_REACHED_TEXT, mainKeyboard());
         return;
@@ -1194,7 +1185,6 @@ function routeMessage(int $chatId, string $text, array $m): void
         return;
     }
 
-    // ----- حالت‌های منتظر ورودی -----
     $state = getMode($chatId);
     if ($state !== null) {
         $mode = (string) ($state['mode'] ?? '');
@@ -1242,7 +1232,6 @@ function routeMessage(int $chatId, string $text, array $m): void
         return;
     }
 
-    // ----- گفتگوی متنی (با نوار پیشرفت) -----
     $progress = (new Progress($chatId, LABEL_CHAT))->start();
     $started = microtime(true);
 
