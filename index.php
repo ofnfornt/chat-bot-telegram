@@ -2,7 +2,7 @@
 declare(strict_types=1);
 
 // ============================================================
-// ربات تلگرام + Pollinations - نسخه‌ی PHP برای Render (حالت Webhook)
+// ربات تلگرام + Pollinations - نسخه‌ی PHP (حالت Long Polling)
 // ============================================================
 
 function env(string $name, string $default = ''): string
@@ -12,14 +12,14 @@ function env(string $name, string $default = ''): string
 }
 
 date_default_timezone_set(env('TIMEZONE', 'UTC'));
-set_time_limit(300);
+set_time_limit(0);
 ignore_user_abort(true);
 
 // ----- تنظیمات (مقادیر مستقیماً وارد شده‌اند) -----
-define('BOT_TOKEN', '204950570:AAFzycx2TKuxm3kLWO8NCN7efK4xDEbEzRE'); // <--- توکن را اینجا بگذارید
-define('ADMIN_IDS_RAW', '8866404328'); // <--- آیدی عددی خود را اینجا بگذارید (مثلاً '123456789')
+define('BOT_TOKEN', '204950570:AAFzycx2TKuxm3kLWO8NCN7efK4xDEbEzRE');
+define('ADMIN_IDS_RAW', '8866404328');
 define('DEFAULT_DAILY_LIMIT', 50);
-define('POLLINATIONS_API_KEY', 'sk_bJg5A28imMHYUBIGJU23NYuqaRUQsyku'); // <--- کلید API را اینجا بگذارید
+define('POLLINATIONS_API_KEY', 'sk_bJg5A28imMHYUBIGJU23NYuqaRUQsyku');
 define('WEBHOOK_SECRET', '');
 define('STORAGE_DIR', rtrim(env('STORAGE_DIR', __DIR__ . '/data'), '/'));
 
@@ -123,7 +123,7 @@ const ADMIN_BROADCAST_ASK = "✉ متن پیام همگانی را بفرست.\n
 const ADMIN_CLOSED_TEXT = '✖ پنل بسته شد. برای باز کردن دوباره، /admin را بفرست.';
 
 // ============================================================
-// ذخیره‌سازی (فایل JSON با قفل، چون هر درخواست یک پروسس جدا است)
+// ذخیره‌سازی (فایل JSON با قفل)
 // ============================================================
 function tx(callable $fn, bool $write = true): mixed
 {
@@ -627,7 +627,7 @@ final class Progress
 }
 
 // ============================================================
-// درخواست HTTP (با نوار پیشرفت زنده)
+// درخواست HTTP
 // ============================================================
 function httpFetch(string $url, array $headers = [], ?string $body = null, int $timeout = 120, ?Progress $progress = null): array
 {
@@ -1326,38 +1326,39 @@ function handleCallback(array $cb): void
 }
 
 // ============================================================
-// ورودی وبهوک
+// ورودی Long Polling (به جای وب‌هوک)
 // ============================================================
-if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'POST') {
-    echo 'ok';   // برای health check و پینگ
-    exit;
-}
+set_time_limit(0);
 
-if (WEBHOOK_SECRET !== '' && ($_SERVER['HTTP_X_TELEGRAM_BOT_API_SECRET_TOKEN'] ?? '') !== WEBHOOK_SECRET) {
-    http_response_code(403);
-    exit;
-}
+// حذف وب‌هوک قبلی (فقط یک بار لازم است، اما اینجا مطمئن می‌شویم)
+tg('deleteWebhook');
 
-$update = json_decode(file_get_contents('php://input') ?: '', true);
-if (!is_array($update)) {
-    echo 'ok';
-    exit;
-}
+$lastUpdateId = 0;
 
-$updateId = (int) ($update['update_id'] ?? 0);
-if ($updateId > 0 && !claimUpdate($updateId)) {
-    echo 'ok';   // این آپدیت قبلاً پردازش شده
-    exit;
-}
+echo "Starting Long Polling loop...\n";
 
-try {
-    if (isset($update['callback_query'])) {
-        handleCallback($update['callback_query']);
-    } elseif (isset($update['message'])) {
-        handleMessage($update['message']);
+while (true) {
+    $updates = tg('getUpdates', [
+        'offset' => $lastUpdateId + 1,
+        'timeout' => 30,
+        'allowed_updates' => ['message', 'callback_query']
+    ]);
+
+    if (isset($updates['result']) && is_array($updates['result'])) {
+        foreach ($updates['result'] as $update) {
+            $lastUpdateId = $update['update_id'];
+
+            try {
+                if (isset($update['callback_query'])) {
+                    handleCallback($update['callback_query']);
+                } elseif (isset($update['message'])) {
+                    handleMessage($update['message']);
+                }
+            } catch (Throwable $e) {
+                error_log('خطای داخلی: ' . $e->getMessage());
+            }
+        }
     }
-} catch (Throwable $e) {
-    error_log('خطای داخلی: ' . $e->getMessage());
+    
+    usleep(500000); 
 }
-
-echo 'ok';
